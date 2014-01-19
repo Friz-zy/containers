@@ -36,17 +36,13 @@ import sys
 import shutil
 import argparse
 
-if os.getuid() != 0:
-    print("you are not root")
-    sys.exit(1)
+mknode = "/bin/mknod"
+ldd = "/usr/bin/ldd"
 
-parser = argparse.ArgumentParser(description='This utility create chroot directory and сopy binary with required libs to it')
-parser.add_argument('directory', action='store', help='chroot directory')
-parser.add_argument('binaries', action='store', help='binaries for copying')
-args = parser.parse_args()
-
-print("hello %s" % os.getlogin())
-
+if os.path.splitdrive(sys.executable)[0]:
+    root = os.path.splitdrive(sys.executable)[0]
+else:
+    root = "/"
 
 root_structure = ["etc",
                   "dev",
@@ -79,65 +75,69 @@ etc_files = ["group",
 etc_dir = ["ld.so.conf.d",
            "prelink.conf.d",]
 
-mknode = "/bin/mknod"
-ldd = "/usr/bin/ldd"
+def bin2chroot(directory, binaries):
+    if os.getuid() != 0:
+        print("you are not root")
+        sys.exit(1)
 
-if os.path.splitdrive(sys.executable)[0]:
-    root = os.path.splitdrive(sys.executable)[0]
-else:
-    root = "/"
+    if os.path.exists(directory):
+        q = "Directory %s exist. Do you want to copy binary into it? " % directory
+        y = ("y", "Y", "yes", "Yes")
+        try:
+            if not str(raw_input(q)) in y:
+                sys.exit(1)
+        except:
+            if not str(input(q)) in y:
+                sys.exit(1)
+    else:
+        os.mkdir(directory)
 
-if os.path.exists(args.directory):
-    q = "Directory %s exist. Do you want to copy binary into it?" % args.directory
-    y = ("y", "Y", "yes", "Yes")
-    try:
-        if not str(raw_input(q)) in y:
-            sys.exit(1)
-    except:
-        if not str(input(q)) in y:
-            sys.exit(1)
-else:
-    os.mkdir(args.directory)
+    for d in root_structure:
+        di = os.path.join(directory, d)
+        if not os.path.exists(di):
+            os.mkdir(di)
 
-for d in root_structure:
-    di = os.path.join(args.directory, d)
-    if not os.path.exists(di):
-        os.mkdir(di)
+    if os.path.exists(os.path.join(directory, "var")):
+        tmp = os.path.join(directory, "var", "tmp")
+        if not os.path.exists(tmp):
+            os.mkdir(tmp)
 
-if os.path.exists(os.path.join(args.directory, "var")):
-    tmp = os.path.join(args.directory, "var", "tmp")
-    if not os.path.exists(tmp):
-        os.mkdir(tmp)
+    os.system("%s -m 0666 %s c 1 3" % (mknode, os.path.join(directory, "dev", "null")))
+    os.system("%s -m 0666 %s c 1 8" % (mknode, os.path.join(directory, "dev", "random")))
+    os.system("%s -m 0444 %s c 1 9" % (mknode, os.path.join(directory, "dev", "urandom")))
 
-os.system("%s -m 0666 %s c 1 3" % (mknode, os.path.join(args.directory, "dev", "null")))
-os.system("%s -m 0666 %s c 1 8" % (mknode, os.path.join(args.directory, "dev", "random")))
-os.system("%s -m 0444 %s c 1 9" % (mknode, os.path.join(args.directory, "dev", "urandom")))
-
-for b in args.binaries.split(","):
-    bnew = os.path.join(args.directory, b[len(root):])
-    if not os.path.exists(os.path.dirname(bnew)):
-        os.makedirs(os.path.dirname(bnew))
-    shutil.copy(b, bnew)
-    stdout = os.popen('%s %s' % (ldd, b))
-    for l in stdout:
-        if "=" in l and len(l.split()) > 3:
-            b = l.split()[2]
-        elif "=" not in l:
-            b = l.split()[0]
-        else:
-            continue
-        bnew = os.path.join(args.directory, b[len(root):])
+    for b in binaries.split(","):
+        bnew = os.path.join(directory, b[len(root):])
         if not os.path.exists(os.path.dirname(bnew)):
             os.makedirs(os.path.dirname(bnew))
         shutil.copy(b, bnew)
-    
-for f in etc_files:
-    if os.path.exists(os.path.join(root, "etc", f)):
-        shutil.copy(os.path.join(root, "etc", f), os.path.join(args.directory, "etc", f))
+        stdout = os.popen('%s %s' % (ldd, b))
+        for l in stdout:
+            if "=" in l and len(l.split()) > 3:
+                b = l.split()[2]
+            elif "=" not in l:
+                b = l.split()[0]
+            else:
+                continue
+            bnew = os.path.join(directory, b[len(root):])
+            if not os.path.exists(os.path.dirname(bnew)):
+                os.makedirs(os.path.dirname(bnew))
+            shutil.copy(b, bnew)
+        
+    for f in etc_files:
+        if os.path.exists(os.path.join(root, "etc", f)):
+            shutil.copy(os.path.join(root, "etc", f), os.path.join(directory, "etc", f))
 
-for d in etc_dir:
-    if os.path.exists(os.path.join(root, "etc", d)):
-        shutil.copytree(os.path.join(root, "etc", d), os.path.join(args.directory, "etc", d))
+    for d in etc_dir:
+        if os.path.exists(os.path.join(root, "etc", d)):
+            shutil.copytree(os.path.join(root, "etc", d), os.path.join(directory, "etc", d))
 
-print("All done, bye!")
-sys.exit(0)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='This utility create chroot directory and сopy binary with required libs to it')
+    parser.add_argument('directory', action='store', help='chroot directory')
+    parser.add_argument('binaries', action='store', help='binaries for copying')
+    args = parser.parse_args()
+    print("hello %s" % os.getlogin())
+    bin2chroot(args.directory, args.binaries)
+    print("All done, bye!")
+    sys.exit(0)
