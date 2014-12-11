@@ -81,6 +81,8 @@ def copy(src, dst):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='This utility create chroot rootfs and сopy binary with required libs to it')
     parser.add_argument('--rootfs', action='store', dest='rootfs', help='chroot rootfs')
+    parser.add_argument('-p|--path', action='store', dest='path', help='main path')
+    parser.add_argument('-n|--name', action='store', dest='name', help='name')
     parser.add_argument('-b|--binaries', action='store', dest='binaries', help='binaries for copying')
     parser.add_argument('-c', action='store', dest='config', default="", help='binaries configs for copying')
     args = parser.parse_args()
