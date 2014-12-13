@@ -23,7 +23,8 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-""" 
+"""
+
 
 import os
 import sys
@@ -119,8 +120,8 @@ if __name__ == "__main__":
     for node in nodes:
         name = os.path.join(os.path.join(rootfs, 'dev'), node[0])
         mode = node[1]
-        dev = os.makedev(node[2], node[3])
-        os.mknod(name, mode, dev)
+        if not os.path.exists(name):
+            os.mknod(name, mode, dev)
 
     if binaries:
         for b in binaries.split(","):
