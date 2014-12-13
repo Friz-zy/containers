@@ -29,6 +29,7 @@ import os
 import sys
 import shutil
 import argparse
+from getpass import getuser
 from subprocess import Popen, PIPE
 
 ldd = Popen(['which', 'ldd'], stdout=PIPE, stderr=PIPE).communicate()[0].strip()
@@ -73,6 +74,21 @@ nodes = [
     ('urandom', 8630, 1, 9),
 ]
 
+config = {
+    "lxc.id_map": "u 0 100000 65536",
+    "lxc.id_map": "g 0 100000 65536",
+    "lxc.network.type": "veth",
+    "lxc.network.link": "lxcbr0",
+    "lxc.mount.entry": "proc proc proc nodev,noexec,nosuid 0 0",
+    "lxc.mount.entry": "sysfs sys sysfs ro 0 0",
+    "lxc.tty": "1",
+}
+
+clines = [
+    "# When using LXC with apparmor, uncomment the next line to run unconfined:",
+    "#lxc.aa_profile = unconfined"
+]
+
 
 def copy(src, dst):
     if os.path.isfile(src):
@@ -86,7 +102,7 @@ def copy(src, dst):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='This utility create chroot rootfs and сopy binaries with required libs to it')
+    parser = argparse.ArgumentParser(description='This utility create lxc rootfs and сopy binaries with required libs to it')
     parser.add_argument('-r', '--rootfs', action='store', dest='rootfs', help='chroot rootfs')
     parser.add_argument('-p', '--path', action='store', dest='path', help='main path')
     parser.add_argument('-n', '--name', action='store', dest='name', help='name')
@@ -99,8 +115,8 @@ if __name__ == "__main__":
     rootfs = args.rootfs
     path = args.path
     name = args.name
-    binaries = args.binaries
-    configs = args.configs
+    binaries = args.binaries or ""
+    configs = args.configs or ""
     uid = args.uid or os.getuid()
     gid = args.gid or os.getgid()
 
@@ -109,7 +125,29 @@ if __name__ == "__main__":
         sys.exit(1)
 
     if os.getuid() != 0:
-        print("you are not root")
+        print("you are not root, try this one:")
+        print("sudo usermod -v 100000-200000 -w 100000-200000 $USER")
+        with open("/etc/lxc/lxc-usernet", "r") as f:
+            if getuser() not in f.read():
+                print('echo "$USER veth lxcbr0 2" | sudo tee -a /etc/lxc/lxc-usernet')
+        print(" ".join((
+            "sudo",
+            __file__,
+            "-r",
+            rootfs,
+            "-p",
+            path,
+            "-n",
+            name,
+            "-u",
+            str(uid),
+            "-g",
+            str(gid),
+            "-b",
+            binaries,
+            "-c",
+            configs))
+        )
         sys.exit(1)
 
     if os.path.exists(rootfs):
@@ -134,8 +172,17 @@ if __name__ == "__main__":
         name = os.path.join(os.path.join(rootfs, 'dev'), node[0])
         mode = node[1]
         dev = os.makedev(node[2], node[3])
-        os.mknod(name, mode, dev)
+        if not os.path.exists(name):
+            os.mknod(name, mode, dev)
         os.chown(name, uid, gid)
+
+    pconfig = os.path.join(path, "config")
+    with open(pconfig, "a+") as f:
+        ctext = f.read()
+        for k in config:
+            if k not in ctext:
+                clines.append(" = ".join((k, config[k])))
+        f.writelines(clines)
 
     if binaries:
         for b in binaries.split(","):
