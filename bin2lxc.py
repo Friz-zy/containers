@@ -29,8 +29,9 @@ import os
 import sys
 import shutil
 import argparse
+from subprocess import Popen, PIPE
 
-ldd, _ = os.Popen(['which', 'ldd']).communicate()
+ldd = Popen(['which', 'ldd'], stdout=PIPE, stderr=PIPE).communicate()[0].strip()
 
 if os.path.splitdrive(sys.executable)[0]:
     root = os.path.splitdrive(sys.executable)[0]
@@ -55,78 +56,107 @@ rootfs_structure = [
     'var',
 ]
 
+# os.stat(path)
+# st_mode
+# os.minor(st_dev)
+# os.major(st_dev)
 nodes = [
-    ('tty', 'crw-rw-rw-')
-    ('console', 'crw-------')
-    ('tty0', 'crw--w----')
-    ('tty1' 'crw-rw----')
-    ('tty5' 'crw-rw----')
-    ('ram0', 'brw-rw----')
-    ('null', 'crw-rw-rw-')
-    ('zero', 'crw-rw-rw-')
-    ('random', 'crw-rw-rw-')
-    ('urandom', 'crw-rw-rw-')
+    ('tty', 8630, 5, 0),
+    ('console', 8576, 5, 1),
+    ('tty0', 8592, 4, 0),
+    ('tty1', 8624, 4, 0),
+    ('tty5', 8624, 4, 0),
+    ('ram0', 25008, 1, 0),
+    ('null', 8630, 1, 3),
+    ('zero', 8630, 1, 5),
+    ('random', 8630, 1, 8),
+    ('urandom', 8630, 1, 9),
 ]
+
 
 def copy(src, dst):
     if os.path.isfile(src):
         if not os.path.exists(os.path.dirname(dst)):
             os.makedirs(os.path.dirname(dst))
-        shutil.copy(src, dst)
+        shutil.copy2(src, dst)
     elif os.path.isdir(src):
         if not os.path.exists(os.path.dirname(dst)):
             os.makedirs(os.path.dirname(dst))
         shutil.copytree(src, dst)
 
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='This utility create chroot rootfs and сopy binary with required libs to it')
-    parser.add_argument('--rootfs', action='store', dest='rootfs', help='chroot rootfs')
+    parser = argparse.ArgumentParser(description='This utility create chroot rootfs and сopy binaries with required libs to it')
+    parser.add_argument('--rootfs', action='store', help='chroot rootfs')
     parser.add_argument('-p|--path', action='store', dest='path', help='main path')
     parser.add_argument('-n|--name', action='store', dest='name', help='name')
+    parser.add_argument('--mapped-uid', action='store', dest='uid', help='mapped uid')
+    parser.add_argument('--mapped-gid', action='store', dest='gid', help='mapped gid')
     parser.add_argument('-b|--binaries', action='store', dest='binaries', help='binaries for copying')
-    parser.add_argument('-c', action='store', dest='config', default="", help='binaries configs for copying')
+    parser.add_argument('-c', action='store', dest='configs', default="", help='binaries configs for copying')
     args = parser.parse_args()
+
+    rootfs = args.rootfs
+    path = args.path
+    name = args.name
+    binaries = args.binaries
+    configs = args.configs
+    uid = args.uid or os.getuid()
+    gid = args.gid or os.getgid()
+
+    if not (rootfs, path, name):
+        print("not enough arguments")
+        sys.exit(1)
 
     if os.getuid() != 0:
         print("you are not root")
         sys.exit(1)
 
     if os.path.exists(rootfs):
-        q = "Directory %s exist. Do you want to copy binary into it? " % rootfs
+        q = "Directory %s exist. Do you want to copy binaries into it? " % rootfs
         y = ("y", "Y", "yes", "Yes")
         try:
             if not str(raw_input(q)) in y:
                 sys.exit(1)
         except:
-            if not str(input(q)) in y:
-                sys.exit(1)
+            sys.exit(1)
     else:
         os.mkdir(rootfs)
+    os.chown(rootfs, uid, gid)
 
     for d in rootfs_structure:
         di = os.path.join(rootfs, d)
         if not os.path.exists(di):
             os.mkdir(di)
+        os.chown(di, uid, gid)
 
     for node in nodes:
         name = os.path.join(os.path.join(rootfs, 'dev'), node[0])
         mode = node[1]
-        os.mknod(name, mode)
+        dev = os.makedev(node[2], node[3])
+        os.mknod(name, mode, dev)
+        os.chown(name, uid, gid)
 
-    for b in binaries.split(","):
-        bnew = os.path.join(rootfs, b[len(root):])
-        copy(b, bnew)
-        stdout = os.popen('%s %s' % (ldd, b))
-        for l in stdout:
-            if "=" in l and len(l.split()) > 3:
-                b = l.split()[2]
-            elif "=" not in l:
-                b = l.split()[0]
-            else:
-                continue
+    if binaries:
+        for b in binaries.split(","):
+            b = Popen(['which', b], stdout=PIPE, stderr=PIPE).communicate()[0].strip()
             bnew = os.path.join(rootfs, b[len(root):])
             copy(b, bnew)
+            os.chown(bnew, uid, gid)
+            stdout = Popen([ldd, b], stdout=PIPE, stderr=PIPE).communicate()[0].strip()
+            for l in stdout.split('\n'):
+                if "=" in l and len(l.split()) > 3:
+                    b = l.split()[2]
+                elif "=" not in l:
+                    b = l.split()[0]
+                else:
+                    continue
+                bnew = os.path.join(rootfs, b[len(root):])
+                copy(b, bnew)
+                os.chown(bnew, uid, gid)
 
-    if config:
-        for c in config.split(','):
-            copy(c, os.path.join(rootfs, c[len(root):]))
+    if configs:
+        for c in configs.split(','):
+            new = os.path.join(rootfs, c[len(root):])
+            copy(c, new)
+            os.chown(new, uid, gid)
