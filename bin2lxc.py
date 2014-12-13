@@ -87,13 +87,13 @@ def copy(src, dst):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='This utility create chroot rootfs and сopy binaries with required libs to it')
-    parser.add_argument('--rootfs', action='store', help='chroot rootfs')
-    parser.add_argument('-p|--path', action='store', dest='path', help='main path')
-    parser.add_argument('-n|--name', action='store', dest='name', help='name')
-    parser.add_argument('--mapped-uid', action='store', dest='uid', help='mapped uid')
-    parser.add_argument('--mapped-gid', action='store', dest='gid', help='mapped gid')
-    parser.add_argument('-b|--binaries', action='store', dest='binaries', help='binaries for copying')
-    parser.add_argument('-c', action='store', dest='configs', default="", help='binaries configs for copying')
+    parser.add_argument('-r', '--rootfs', action='store', dest='rootfs', help='chroot rootfs')
+    parser.add_argument('-p', '--path', action='store', dest='path', help='main path')
+    parser.add_argument('-n', '--name', action='store', dest='name', help='name')
+    parser.add_argument('-u', '--mapped-uid', action='store', dest='uid', help='mapped uid')
+    parser.add_argument('-g', '--mapped-gid', action='store', dest='gid', help='mapped gid')
+    parser.add_argument('-b', '--binaries', action='store', dest='binaries', help='binaries for copying')
+    parser.add_argument('-c', '--configs', action='store', dest='configs', default="", help='binaries configs for copying')
     args = parser.parse_args()
 
     rootfs = args.rootfs
@@ -104,7 +104,7 @@ if __name__ == "__main__":
     uid = args.uid or os.getuid()
     gid = args.gid or os.getgid()
 
-    if not (rootfs, path, name):
+    if not rootfs or not path or not name:
         print("not enough arguments")
         sys.exit(1)
 
