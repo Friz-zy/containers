@@ -56,6 +56,10 @@ rootfs_structure = [
     'var',
 ]
 
+# os.stat(path)
+# st_mode
+# os.minor(st_dev)
+# os.major(st_dev)
 nodes = [
     ('tty', 8630, 5, 0),
     ('console', 8576, 5, 1),
@@ -82,7 +86,7 @@ def copy(src, dst):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='This utility create chroot rootfs and сopy binary with required libs to it')
+    parser = argparse.ArgumentParser(description='This utility create chroot rootfs and сopy binaries with required libs to it')
     parser.add_argument('rootfs', action='store', help='chroot rootfs')
     parser.add_argument('-b|--binaries', action='store', dest='binaries', help='binaries for copying')
     parser.add_argument('-c', action='store', dest='configs', default="", help='binaries configs for copying')
@@ -97,14 +101,13 @@ if __name__ == "__main__":
         sys.exit(1)
 
     if os.path.exists(rootfs):
-        q = "Directory %s exist. Do you want to copy binary into it? " % rootfs
+        q = "Directory %s exist. Do you want to copy binaries into it? " % rootfs
         y = ("y", "Y", "yes", "Yes")
         try:
             if not str(raw_input(q)) in y:
                 sys.exit(1)
         except:
-            if not str(input(q)) in y:
-                sys.exit(1)
+            sys.exit(1)
     else:
         os.mkdir(rootfs)
 
