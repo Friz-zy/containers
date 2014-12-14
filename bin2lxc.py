@@ -29,6 +29,7 @@ import os
 import sys
 import shutil
 import argparse
+import platform
 from getpass import getuser
 from subprocess import Popen, PIPE
 
@@ -42,10 +43,12 @@ else:
 rootfs_structure = [
     'bin',
     'dev',
+    'dev/pts',
     'etc',
     'home',
     'lib',
     'lib64',
+    'lxc_putold',
     'opt',
     'proc',
     'root',
@@ -62,32 +65,47 @@ rootfs_structure = [
 # os.minor(st_dev)
 # os.major(st_dev)
 nodes = [
-    ('tty', 8630, 5, 0),
-    ('console', 8576, 5, 1),
-    ('tty0', 8592, 4, 0),
-    ('tty1', 8624, 4, 0),
-    ('tty5', 8624, 4, 0),
-    ('ram0', 25008, 1, 0),
-    ('null', 8630, 1, 3),
-    ('zero', 8630, 1, 5),
-    ('random', 8630, 1, 8),
-    ('urandom', 8630, 1, 9),
+    ('console', 33204, 2, 252),
+    ('full', 33204, 2, 252),
+    ('null', 33204, 2, 252),
+    ('random', 33204, 2, 252),
+    ('tty', 33204, 2, 252),
+    ('tty1', 33200, 2, 252),
+    ('tty2', 33200, 2, 252),
+    ('tty3', 33200, 2, 252),
+    ('tty4', 33200, 2, 252),
+    ('urandom', 33204, 2, 252),
+    ('zero', 33204, 2, 252),
 ]
 
-config = {
-    "lxc.id_map": "u 0 100000 65536",
-    "lxc.id_map": "g 0 100000 65536",
-    "lxc.network.type": "veth",
-    "lxc.network.link": "lxcbr0",
-    "lxc.mount.entry": "proc proc proc nodev,noexec,nosuid 0 0",
-    "lxc.mount.entry": "sysfs sys sysfs ro 0 0",
-    "lxc.tty": "1",
-}
-
-clines = [
-    "# When using LXC with apparmor, uncomment the next line to run unconfined:",
-    "#lxc.aa_profile = unconfined"
+links = [
+    ('core', '/proc/kcore'),
+    ('fd', '/proc/self/fd/'),
+    ('kmsg', 'console'),
+    ('ptmx', '/dev/pts/ptmx'),
+    ('shm', '/run/shm/'),
+    ('stderr', 'fd/2'),
+    ('stdin', 'fd/0'),
+    ('stdout', 'fd/1'),
 ]
+
+config = """
+
+# Distribution configuration
+lxc.include = /usr/share/lxc/config/ubuntu.common.conf
+lxc.include = /usr/share/lxc/config/ubuntu.userns.conf
+lxc.arch = {arch}
+
+# Container specific configuration
+lxc.id_map = u 0 100000 65536
+lxc.id_map = g 0 100000 65536
+lxc.rootfs = {rootfs}
+lxc.utsname = {name}
+
+# Network configuration
+lxc.network.type = veth
+lxc.network.link = lxcbr0
+"""
 
 
 def copy(src, dst):
@@ -117,48 +135,14 @@ if __name__ == "__main__":
     name = args.name
     binaries = args.binaries or ""
     configs = args.configs or ""
-    uid = args.uid or os.getuid()
-    gid = args.gid or os.getgid()
+    uid = int(args.uid) or os.getuid()
+    gid = int(args.gid) or os.getgid()
 
     if not rootfs or not path or not name:
         print("not enough arguments")
         sys.exit(1)
 
-    if os.getuid() != 0:
-        print("you are not root, try this one:")
-        print("sudo usermod -v 100000-200000 -w 100000-200000 $USER")
-        with open("/etc/lxc/lxc-usernet", "r") as f:
-            if getuser() not in f.read():
-                print('echo "$USER veth lxcbr0 2" | sudo tee -a /etc/lxc/lxc-usernet')
-        print(" ".join((
-            "sudo",
-            __file__,
-            "-r",
-            rootfs,
-            "-p",
-            path,
-            "-n",
-            name,
-            "-u",
-            str(uid),
-            "-g",
-            str(gid),
-            "-b",
-            binaries,
-            "-c",
-            configs))
-        )
-        sys.exit(1)
-
-    if os.path.exists(rootfs):
-        q = "Directory %s exist. Do you want to copy binaries into it? " % rootfs
-        y = ("y", "Y", "yes", "Yes")
-        try:
-            if not str(raw_input(q)) in y:
-                sys.exit(1)
-        except:
-            sys.exit(1)
-    else:
+    if not os.path.exists(rootfs):
         os.mkdir(rootfs)
     os.chown(rootfs, uid, gid)
 
@@ -169,20 +153,20 @@ if __name__ == "__main__":
         os.chown(di, uid, gid)
 
     for node in nodes:
-        name = os.path.join(os.path.join(rootfs, 'dev'), node[0])
+        pth = os.path.join(os.path.join(rootfs, 'dev'), node[0])
         mode = node[1]
         dev = os.makedev(node[2], node[3])
-        if not os.path.exists(name):
-            os.mknod(name, mode, dev)
-        os.chown(name, uid, gid)
+        if not os.path.exists(pth):
+            os.mknod(pth, mode, dev)
+        os.chown(pth, uid, gid)
+
+    for l in links:
+        pth = os.path.join(os.path.join(rootfs, 'dev'), l[0])
+        os.symlink(l[1], pth)
 
     pconfig = os.path.join(path, "config")
-    with open(pconfig, "a+") as f:
-        ctext = f.read()
-        for k in config:
-            if k not in ctext:
-                clines.append(" = ".join((k, config[k])))
-        f.writelines(clines)
+    with open(pconfig, "w+") as f:
+        f.write(config.format(arch=platform.processor(), rootfs=rootfs, name=name))
 
     if binaries:
         for b in binaries.split(","):
