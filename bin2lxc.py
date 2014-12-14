@@ -27,6 +27,7 @@ SOFTWARE.
 
 import os
 import sys
+import stat
 import shutil
 import argparse
 import platform
@@ -107,6 +108,14 @@ lxc.network.type = veth
 lxc.network.link = lxcbr0
 """
 
+dhconf = "send host-name = gethostname();\n"
+
+init = """
+ifconfig eth0 up
+dhclient eth0 -cf /dhclient.conf
+exec /usr/sbin/init.lxc -- /bin/sh
+"""
+
 
 def copy(src, dst):
     if os.path.isfile(src):
@@ -128,6 +137,7 @@ if __name__ == "__main__":
     parser.add_argument('-g', '--mapped-gid', action='store', dest='gid', help='mapped gid')
     parser.add_argument('-b', '--binaries', action='store', dest='binaries', help='binaries for copying')
     parser.add_argument('-c', '--configs', action='store', dest='configs', default="", help='binaries configs for copying')
+    parser.add_argument('--network', action='store_true', dest='network', default="", help='copy sh, ifconfig, dhclient, init.lxc + up network')
     args = parser.parse_args()
 
     rootfs = args.rootfs
@@ -167,6 +177,19 @@ if __name__ == "__main__":
     pconfig = os.path.join(path, "config")
     with open(pconfig, "w+") as f:
         f.write(config.format(arch=platform.processor(), rootfs=rootfs, name=name))
+
+    if args.network:
+        binaries = "sh,ifconfig,dhclient,init.lxc," + binaries
+        pdhconf = os.path.join(rootfs, 'dhclient.conf')
+        with open(pdhconf, 'w') as f:
+            f.write(dhconf)
+        os.chown(pdhconf, uid, gid)
+        pinit = os.path.join(os.path.join(rootfs, 'sbin'), 'init')
+        with open(pinit, 'w') as f:
+            f.write(init)
+        st = os.stat(pinit)
+        os.chmod(pinit, st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        os.chown(pinit, uid, gid)
 
     if binaries:
         for b in binaries.split(","):
