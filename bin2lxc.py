@@ -179,7 +179,14 @@ if __name__ == "__main__":
         f.write(config.format(arch=platform.processor(), rootfs=rootfs, name=name))
 
     if args.network:
-        binaries = "sh,ifconfig,dhclient,init.lxc," + binaries
+        binaries = "sh,bash,ifconfig,dhclient,dhclient-script,ip,hostname,sleep,init.lxc," + binaries
+        if not os.path.exists(rootfs + "/var/lib"):
+            os.mkdir(rootfs + "/var/lib")
+        if not os.path.exists(rootfs + "/var/lib/dhcp/"):
+            os.mkdir(rootfs + "/var/lib/dhcp/")
+        if not os.path.exists(rootfs + "/etc/fstab"):
+            with open(rootfs + "/etc/fstab", 'w') as f:
+                f.write("")
         pdhconf = os.path.join(rootfs, 'dhclient.conf')
         with open(pdhconf, 'w') as f:
             f.write(dhconf)
@@ -199,9 +206,9 @@ if __name__ == "__main__":
             os.chown(bnew, uid, gid)
             stdout = Popen([ldd, b], stdout=PIPE, stderr=PIPE).communicate()[0].strip()
             for l in stdout.split('\n'):
-                if "=" in l and len(l.split()) > 3:
+                if "=" in l and len(l.split()) > 3 and 'lib' in l:
                     b = l.split()[2]
-                elif "=" not in l:
+                elif "=" not in l and 'lib' in l:
                     b = l.split()[0]
                 else:
                     continue
