@@ -54,11 +54,30 @@ rootfs_structure = [
     'proc',
     'root',
     'run',
+    'run/lock',
     'sbin',
     'sys',
     'tmp',
     'usr',
+    'usr/bin',
+    'usr/games',
+    'usr/include',
+    'usr/lib',
+    'usr/local',
+    'usr/sbin',
+    'usr/share',
+    'usr/src',
     'var',
+    'var/backups',
+    'var/cache',
+    'var/crash',
+    'var/lib',
+    'var/local',
+    'var/log',
+    'var/mail',
+    'var/opt',
+    'var/spool',
+    'var/tmp',
 ]
 
 # os.stat(path)
@@ -80,14 +99,16 @@ nodes = [
 ]
 
 links = [
-    ('core', '/proc/kcore'),
-    ('fd', '/proc/self/fd/'),
-    ('kmsg', 'console'),
-    ('ptmx', '/dev/pts/ptmx'),
-    ('shm', '/run/shm/'),
-    ('stderr', 'fd/2'),
-    ('stdin', 'fd/0'),
-    ('stdout', 'fd/1'),
+    ('dev/core', '/proc/kcore'),
+    ('dev/fd', '/proc/self/fd/'),
+    ('dev/kmsg', '/console'),
+    ('dev/ptmx', '/dev/pts/ptmx'),
+    ('dev/shm', '/run/shm/'),
+    ('dev/stderr', '/fd/2'),
+    ('dev/stdin', '/fd/0'),
+    ('dev/stdout', '/fd/1'),
+    ('var/run', '/run'),
+    ('var/lock', '/run/lock'),
 ]
 
 config = """
@@ -171,7 +192,7 @@ if __name__ == "__main__":
         os.chown(pth, uid, gid)
 
     for l in links:
-        pth = os.path.join(os.path.join(rootfs, 'dev'), l[0])
+        pth = os.path.join(rootfs, l[0])
         os.symlink(l[1], pth)
 
     pconfig = os.path.join(path, "config")
@@ -179,12 +200,17 @@ if __name__ == "__main__":
         f.write(config.format(arch=platform.processor(), rootfs=rootfs, name=name))
 
     if args.network:
-        binaries = "sh,ifconfig,dhclient,init.lxc," + binaries
-        pdhconf = os.path.join(rootfs, 'dhclient.conf')
+        binaries = "sh,bash,ifconfig,dhclient,dhclient-script,ip,hostname,init.lxc," + binaries
+        if not os.path.exists(rootfs + "/var/lib/dhcp/"):
+            os.mkdir(rootfs + "/var/lib/dhcp/")
+        if not os.path.exists(rootfs + "/etc/fstab"):
+            with open(rootfs + "/etc/fstab", 'w') as f:
+                f.write("")
+        pdhconf = rootfs + '/etc/dhclient.conf'
         with open(pdhconf, 'w') as f:
             f.write(dhconf)
         os.chown(pdhconf, uid, gid)
-        pinit = os.path.join(os.path.join(rootfs, 'sbin'), 'init')
+        pinit = rootfs + '/sbin' + '/init'
         with open(pinit, 'w') as f:
             f.write(init)
         st = os.stat(pinit)
@@ -199,9 +225,9 @@ if __name__ == "__main__":
             os.chown(bnew, uid, gid)
             stdout = Popen([ldd, b], stdout=PIPE, stderr=PIPE).communicate()[0].strip()
             for l in stdout.split('\n'):
-                if "=" in l and len(l.split()) > 3:
+                if "=" in l and len(l.split()) > 3 and 'lib' in l:
                     b = l.split()[2]
-                elif "=" not in l:
+                elif "=" not in l and 'lib' in l:
                     b = l.split()[0]
                 else:
                     continue
