@@ -23,61 +23,54 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-""" 
+"""
 
 import os
 import sys
-import stat
 import shutil
 import argparse
 import platform
-from getpass import getuser
 from subprocess import Popen, PIPE
 
 ldd = Popen(['which', 'ldd'], stdout=PIPE, stderr=PIPE).communicate()[0].strip()
 
-if os.path.splitdrive(sys.executable)[0]:
-    root = os.path.splitdrive(sys.executable)[0]
-else:
-    root = "/"
-
 rootfs_structure = [
-    'bin',
-    'dev',
-    'dev/pts',
-    'etc',
-    'home',
-    'lib',
-    'lib64',
-    'lxc_putold',
-    'opt',
-    'proc',
-    'root',
-    'run',
-    'run/lock',
-    'sbin',
-    'sys',
-    'tmp',
-    'usr',
-    'usr/bin',
-    'usr/games',
-    'usr/include',
-    'usr/lib',
-    'usr/local',
-    'usr/sbin',
-    'usr/share',
-    'usr/src',
-    'var',
-    'var/backups',
-    'var/cache',
-    'var/crash',
-    'var/lib',
-    'var/local',
-    'var/log',
-    'var/mail',
-    'var/opt',
-    'var/spool',
-    'var/tmp',
+    '/bin',
+    '/dev',
+    '/dev/pts',
+    '/etc',
+    '/home',
+    '/lib',
+    '/lib64',
+    '/lxc_putold',
+    '/opt',
+    '/proc',
+    '/root',
+    '/run',
+    '/run/lock',
+    '/sbin',
+    '/sys',
+    '/tmp',
+    '/usr',
+    '/usr/bin',
+    '/usr/games',
+    '/usr/include',
+    '/usr/lib',
+    '/usr/local',
+    '/usr/sbin',
+    '/usr/share',
+    '/usr/src',
+    '/var',
+    '/var/backups',
+    '/var/cache',
+    '/var/crash',
+    '/var/lib',
+    '/var/local',
+    '/var/log',
+    '/var/mail',
+    '/var/opt',
+    '/var/spool',
+    '/var/tmp',
 ]
 
 # os.stat(path)
@@ -85,30 +78,30 @@ rootfs_structure = [
 # os.minor(st_dev)
 # os.major(st_dev)
 nodes = [
-    ('console', 33204, 2, 252),
-    ('full', 33204, 2, 252),
-    ('null', 33204, 2, 252),
-    ('random', 33204, 2, 252),
-    ('tty', 33204, 2, 252),
-    ('tty1', 33200, 2, 252),
-    ('tty2', 33200, 2, 252),
-    ('tty3', 33200, 2, 252),
-    ('tty4', 33200, 2, 252),
-    ('urandom', 33204, 2, 252),
-    ('zero', 33204, 2, 252),
+    ('/dev/console', 33204, 2, 252),
+    ('/dev/full', 33204, 2, 252),
+    ('/dev/null', 33204, 2, 252),
+    ('/dev/random', 33204, 2, 252),
+    ('/dev/tty', 33204, 2, 252),
+    ('/dev/tty1', 33200, 2, 252),
+    ('/dev/tty2', 33200, 2, 252),
+    ('/dev/tty3', 33200, 2, 252),
+    ('/dev/tty4', 33200, 2, 252),
+    ('/dev/urandom', 33204, 2, 252),
+    ('/dev/zero', 33204, 2, 252),
 ]
 
 links = [
-    ('dev/core', '/proc/kcore'),
-    ('dev/fd', '/proc/self/fd/'),
-    ('dev/kmsg', '/console'),
-    ('dev/ptmx', '/dev/pts/ptmx'),
-    ('dev/shm', '/run/shm/'),
-    ('dev/stderr', '/fd/2'),
-    ('dev/stdin', '/fd/0'),
-    ('dev/stdout', '/fd/1'),
-    ('var/run', '/run'),
-    ('var/lock', '/run/lock'),
+    ('/dev/core', '/proc/kcore'),
+    ('/dev/fd', '/proc/self/fd/'),
+    ('/dev/kmsg', '/dev/console'),
+    ('/dev/ptmx', '/dev/pts/ptmx'),
+    ('/dev/shm', '/run/shm/'),
+    ('/dev/stderr', '/dev/fd/2'),
+    ('/dev/stdin', '/dev/fd/0'),
+    ('/dev/stdout', '/dev/fd/1'),
+    ('/var/lock', '/run/lock'),
+    ('/var/run', '/run'),
 ]
 
 config = """
@@ -129,16 +122,30 @@ lxc.network.type = veth
 lxc.network.link = lxcbr0
 """
 
+network_binaries = ",".join((
+    "sh","bash","ifconfig",
+    "dhclient","dhclient-script",
+    "ip","hostname","sleep",""
+    ))
+
+# recommended_binaries = "init.lxc,"
+
 dhconf = "send host-name = gethostname();\n"
 
 init = """
 ifconfig eth0 up
-dhclient eth0 -cf /dhclient.conf
-exec /usr/sbin/init.lxc -- /bin/sh
+dhclient eth0 -cf /etc/dhclient.conf
+exec /bin/bash
 """
 
 
 def copy(src, dst):
+    """copy file or directory.
+
+    Copy file or directory with metadata
+      and permission bits.
+
+    """
     if os.path.isfile(src):
         if not os.path.exists(os.path.dirname(dst)):
             os.makedirs(os.path.dirname(dst))
@@ -178,13 +185,13 @@ if __name__ == "__main__":
     os.chown(rootfs, uid, gid)
 
     for d in rootfs_structure:
-        di = os.path.join(rootfs, d)
+        di = rootfs + d
         if not os.path.exists(di):
             os.mkdir(di)
         os.chown(di, uid, gid)
 
     for node in nodes:
-        pth = os.path.join(os.path.join(rootfs, 'dev'), node[0])
+        pth = rootfs + node[0]
         mode = node[1]
         dev = os.makedev(node[2], node[3])
         if not os.path.exists(pth):
@@ -192,15 +199,17 @@ if __name__ == "__main__":
         os.chown(pth, uid, gid)
 
     for l in links:
-        pth = os.path.join(rootfs, l[0])
+        pth = rootfs + l[0]
         os.symlink(l[1], pth)
 
-    pconfig = os.path.join(path, "config")
+    pconfig = path + "/config"
     with open(pconfig, "w+") as f:
-        f.write(config.format(arch=platform.processor(), rootfs=rootfs, name=name))
+        f.write(config.format(
+            arch=platform.processor(), rootfs=rootfs, name=name
+            ))
 
     if args.network:
-        binaries = "sh,bash,ifconfig,dhclient,dhclient-script,ip,hostname,init.lxc," + binaries
+        binaries = network_binaries + binaries
         if not os.path.exists(rootfs + "/var/lib/dhcp/"):
             os.mkdir(rootfs + "/var/lib/dhcp/")
         if not os.path.exists(rootfs + "/etc/fstab"):
@@ -210,33 +219,37 @@ if __name__ == "__main__":
         with open(pdhconf, 'w') as f:
             f.write(dhconf)
         os.chown(pdhconf, uid, gid)
-        pinit = rootfs + '/sbin' + '/init'
+        pinit = rootfs + '/sbin/init'
         with open(pinit, 'w') as f:
             f.write(init)
         st = os.stat(pinit)
-        os.chmod(pinit, st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        # +x=73
+        os.chmod(pinit, st.st_mode | 73)
         os.chown(pinit, uid, gid)
 
     if binaries:
         for b in binaries.split(","):
-            b = Popen(['which', b], stdout=PIPE, stderr=PIPE).communicate()[0].strip()
-            bnew = os.path.join(rootfs, b[len(root):])
+            p = Popen(['which', b], stdout=PIPE, stderr=PIPE)
+            b = p.communicate()[0].strip()
+            bnew = rootfs + b
             copy(b, bnew)
             os.chown(bnew, uid, gid)
-            stdout = Popen([ldd, b], stdout=PIPE, stderr=PIPE).communicate()[0].strip()
+            p = Popen([ldd, b], stdout=PIPE, stderr=PIPE)
+            stdout = p.communicate()[0].strip()
             for l in stdout.split('\n'):
-                if "=" in l and len(l.split()) > 3 and 'lib' in l:
-                    b = l.split()[2]
-                elif "=" not in l and 'lib' in l:
-                    b = l.split()[0]
-                else:
-                    continue
-                bnew = os.path.join(rootfs, b[len(root):])
-                copy(b, bnew)
-                os.chown(bnew, uid, gid)
+                if 'lib' in l:
+                    if "=" in l and len(l.split()) > 3:
+                        b = l.split()[2]
+                    elif "=" not in l:
+                        b = l.split()[0]
+                    else:
+                        continue
+                    bnew = rootfs + b
+                    copy(b, bnew)
+                    os.chown(bnew, uid, gid)
 
     if configs:
         for c in configs.split(','):
-            new = os.path.join(rootfs, c[len(root):])
+            new = rootfs + c
             copy(c, new)
             os.chown(new, uid, gid)
