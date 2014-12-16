@@ -132,10 +132,9 @@ network_binaries = ",".join((
 
 dhconf = "send host-name = gethostname();\n"
 
-init = """
-ifconfig eth0 up
-dhclient eth0 -cf /etc/dhclient.conf
-exec /bin/bash
+ninit = """
+ifconfig eth0 up &
+dhclient eth0 -cf /etc/dhclient.conf &
 """
 
 
@@ -165,7 +164,8 @@ if __name__ == "__main__":
     parser.add_argument('-g', '--mapped-gid', action='store', dest='gid', help='mapped gid')
     parser.add_argument('-b', '--binaries', action='store', dest='binaries', help='binaries for copying')
     parser.add_argument('-c', '--configs', action='store', dest='configs', default="", help='binaries configs for copying')
-    parser.add_argument('--network', action='store_true', dest='network', default="", help='copy sh, ifconfig, dhclient, init.lxc + up network')
+    parser.add_argument('--network', action='store_true', dest='network', default="", help='copy network binaries and add commands to init script')
+    parser.add_argument('--exec', action='store', dest='execute', default="/bin/bash", help='lxc-start by default execute programm with args (as given string)')
     args = parser.parse_args()
 
     rootfs = args.rootfs
@@ -220,12 +220,17 @@ if __name__ == "__main__":
             f.write(dhconf)
         os.chown(pdhconf, uid, gid)
         pinit = rootfs + '/sbin/init'
-        with open(pinit, 'w') as f:
-            f.write(init)
+        with open(pinit, 'w+') as f:
+            f.write(ninit)
         st = os.stat(pinit)
         # +x=73
         os.chmod(pinit, st.st_mode | 73)
         os.chown(pinit, uid, gid)
+
+    if args.execute:
+        pinit = rootfs + '/sbin/init'
+        with open(pinit, 'a') as f:
+            f.write("exec " + args.execute)
 
     if binaries:
         for b in binaries.split(","):
