@@ -38,6 +38,8 @@ rootfs_structure = [
     '/bin',
     '/dev',
     '/dev/pts',
+    '/dev/dri',
+    '/dev/snd',
     '/etc',
     '/home',
     '/lib',
@@ -51,6 +53,7 @@ rootfs_structure = [
     '/sbin',
     '/sys',
     '/tmp',
+    '/tmp/.X11-unix',
     '/usr',
     '/usr/bin',
     '/usr/games',
@@ -89,6 +92,7 @@ nodes = [
     ('/dev/tty4', 33200, 2, 252),
     ('/dev/urandom', 33204, 2, 252),
     ('/dev/zero', 33204, 2, 252),
+    ('/dev/video0', 33204, 2, 252),
 ]
 
 links = [
@@ -122,6 +126,31 @@ lxc.network.type = veth
 lxc.network.link = lxcbr0
 """
 
+gui_config = """
+lxc.id_map = u 0 100000 1000
+lxc.id_map = g 0 100000 1000
+lxc.id_map = u 1000 1000 1
+lxc.id_map = g 1000 1000 1
+lxc.id_map = u 1001 101001 64535
+lxc.id_map = g 1001 101001 64535
+
+lxc.mount.entry = /dev/dri dev/dri none bind,optional,create=dir
+lxc.mount.entry = /dev/snd dev/snd none bind,optional,create=dir
+lxc.mount.entry = /tmp/.X11-unix tmp/.X11-unix none bind,optional,create=dir
+lxc.mount.entry = /dev/video0 dev/video0 none bind,optional,create=file
+
+lxc.hook.pre-start = {path}/setup-pulse.sh
+"""
+
+gui_pulse_script = """#!/bin/sh
+PULSE_PATH={rootfs}/root/.pulse_socket
+
+if [ ! -e "$PULSE_PATH" ] || [ -z "$(lsof -n $PULSE_PATH 2>&1)" ]; then
+    pactl load-module module-native-protocol-unix auth-anonymous=1 \
+        socket=$PULSE_PATH
+fi
+"""
+
 network_binaries = ",".join((
     "sh","bash","ifconfig",
     "dhclient","dhclient-script",
@@ -137,6 +166,36 @@ ifconfig eth0 up &
 dhclient eth0 -cf /etc/dhclient.conf &
 """
 
+gui_binaries = "ldconfig.real,env,sleep,"
+
+gui_configs = "/etc/ld.so.conf.d,/etc/ld.so.conf,"
+
+rscript = """#!/bin/sh
+CONTAINER={name}
+CMD_LINE="{execute}"
+
+STARTED=false
+
+if ! lxc-wait -n $CONTAINER -s RUNNING -t 0; then
+    lxc-start -n $CONTAINER -d
+    lxc-wait -n $CONTAINER -s RUNNING
+    STARTED=true
+fi
+
+PULSE_SOCKET=/root/.pulse_socket
+
+lxc-attach --clear-env -n $CONTAINER -- sleep 1 & env DISPLAY=$DISPLAY PULSE_SERVER=$PULSE_SOCKET $CMD_LINE
+
+if [ "$STARTED" = "true" ]; then
+    lxc-stop -n $CONTAINER -t 10
+fi
+"""
+
+icon = """[Desktop Entry]
+Name=lxc-{name}
+Exec={path}/start-{name} %U
+Type=Application
+"""
 
 def copy(src, dst):
     """copy file or directory.
@@ -152,7 +211,15 @@ def copy(src, dst):
     elif os.path.isdir(src):
         if not os.path.exists(os.path.dirname(dst)):
             os.makedirs(os.path.dirname(dst))
-        shutil.copytree(src, dst)
+        if not os.path.exists(dst):
+            os.makedirs(dst)
+        for item in os.listdir(src):
+            s = os.path.join(src, item)
+            d = os.path.join(dst, item)
+            if os.path.isdir(s):
+                copy(s, d)
+            else:
+                shutil.copy2(s, d)
 
 
 if __name__ == "__main__":
@@ -165,6 +232,7 @@ if __name__ == "__main__":
     parser.add_argument('-b', '--binaries', action='store', dest='binaries', help='binaries for copying')
     parser.add_argument('-c', '--configs', action='store', dest='configs', default="", help='binaries configs for copying')
     parser.add_argument('--network', action='store_true', dest='network', default="", help='copy network binaries and add commands to init script')
+    parser.add_argument('--gui', action='store_true', dest='gui', help='add access to video and audio')
     parser.add_argument('--exec', action='store', dest='execute', default="/bin/bash", help='lxc-start by default execute programm with args (as given string)')
     args = parser.parse_args()
 
@@ -227,10 +295,55 @@ if __name__ == "__main__":
         os.chmod(pinit, st.st_mode | 73)
         os.chown(pinit, uid, gid)
 
+    if args.gui:
+        binaries = gui_binaries + binaries
+        configs = gui_configs + configs
+        with open(pconfig, "r") as f:
+            oconf = f.readlines()
+            nconf = []
+            for l in oconf:
+                if not "lxc.id_map" in l:
+                    nconf.append(l.rstrip())
+            gui_config = gui_config.format(path=path)
+            nconf += gui_config.splitlines()
+        with open(pconfig, "w") as f:
+            f.write("\n".join(nconf))
+        pscript = path + "/setup-pulse.sh"
+        with open(pscript, "a") as f:
+            f.write(gui_pulse_script.format(rootfs=rootfs))
+        # +x=73
+        os.chmod(pscript, st.st_mode | 73)
+        os.chown(pscript, uid, gid)
+        ppulse = rootfs + '/root/.pulse'
+        if not os.path.exists(ppulse):
+            os.mkdir(ppulse)
+        os.chown(ppulse, uid, gid)
+        cpulse = ppulse + '/client.conf'
+        with open(cpulse, 'w') as f:
+            f.write("disable-shm=yes")
+        os.chown(cpulse, uid, gid)
+        prscript = path + '/start-' + name
+        with open(prscript, 'w') as f:
+            f.write(rscript.format(
+                name=name, execute=args.execute
+                ))
+        # +x=73
+        os.chmod(prscript, st.st_mode | 73)
+        os.chown(prscript, uid, gid)
+        picon =  "{home}/.local/share/applications/lxc-{name}.desktop".format(home=os.path.expanduser("~"), name=name)
+        with open(picon, 'w') as f:
+            f.write(icon.format(name=name, path=path))
+        # +x=73
+        os.chmod(picon, st.st_mode | 73)
+        os.chown(picon, uid, gid)
+
     if args.execute:
         pinit = rootfs + '/sbin/init'
         with open(pinit, 'a') as f:
-            f.write("exec " + args.execute)
+            if not args.gui:
+                f.write("ldconfig.real &\nexec " + args.execute)
+            else:
+                f.write("exec /bin/bash")
 
     if binaries:
         for b in binaries.split(","):
