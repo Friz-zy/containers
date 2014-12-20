@@ -25,6 +25,13 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 
+# NOTE: Skype: lxc-create -t bin2lxc -n test3 -- -b /usr/bin/skype --network --gui --exec "/usr/bin/skype"
+
+# NOTE: apt-get: lxc-create -t bin2lxc -n aptget -- -b apt-get,ping -c /etc/apt/sources.list,/etc/apt/trusted.gpg,/etc/apt/apt.conf.d/,/usr/lib/apt/ --network --gui
+# NOTE: apt-get run: apt-get -o APT::System="Debian dpkg interface"
+
+# NOTE: use strace and chroot to debug the problem
+
 import os
 import sys
 import shutil
@@ -50,6 +57,7 @@ rootfs_structure = [
     '/root',
     '/run',
     '/run/lock',
+    '/run/resolvconf',
     '/sbin',
     '/sys',
     '/tmp',
@@ -106,6 +114,7 @@ links = [
     ('/dev/stdout', '/dev/fd/1'),
     ('/var/lock', '/run/lock'),
     ('/var/run', '/run'),
+    ('/etc/resolv.conf', '/run/resolvconf/resolv.conf'),
 ]
 
 config = """
@@ -157,13 +166,15 @@ network_binaries = ",".join((
     "ip","hostname","sleep",""
     ))
 
+network_configs = "/lib/x86_64-linux-gnu/libnss_files.so.2,/lib/x86_64-linux-gnu/libnss_dns.so.2,/lib/x86_64-linux-gnu/libresolv.so.2,"
+
 # recommended_binaries = "init.lxc,"
 
 dhconf = "send host-name = gethostname();\n"
 
 ninit = """
-ifconfig eth0 up &
-dhclient eth0 -cf /etc/dhclient.conf &
+ifconfig eth0 up 2>&1 >/dev/null &
+dhclient eth0 -cf /etc/dhclient.conf 2>&1 >/dev/null &
 """
 
 gui_binaries = "ldconfig.real,env,sleep,"
@@ -294,6 +305,12 @@ if __name__ == "__main__":
         # +x=73
         os.chmod(pinit, st.st_mode | 73)
         os.chown(pinit, uid, gid)
+        # dns
+        presolf = rootfs + '/run/resolvconf/resolv.conf'
+        with open(presolf, 'w') as f:
+            f.write('nameserver 8.8.8.8\nnameserver 8.8.4.4\n')
+        os.chown(presolf, uid, gid)
+        configs = network_configs + configs
 
     if args.gui:
         binaries = gui_binaries + binaries
