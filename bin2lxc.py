@@ -39,6 +39,13 @@ SOFTWARE.
 --gui
 """
 
+# NOTE: firefox:
+"""lxc-create -t bin2lxc -n mozilla -- \
+-b /usr/lib/firefox/firefox -c /usr/lib/firefox/ \
+--network --gui --lib \
+--exec "/usr/lib/firefox/firefox -new-instance"
+"""
+
 # NOTE: use strace and chroot to debug the problem
 
 import os
@@ -149,6 +156,11 @@ lxc.network.type = veth
 lxc.network.link = lxcbr0
 """
 
+lib_config = """
+lxc.mount.entry=/lib lib none ro,bind 0 0
+lxc.mount.entry=/usr/lib usr/lib none ro,bind 0 0
+"""
+
 gui_config = """
 lxc.id_map = u 0 100000 1000
 lxc.id_map = g 0 100000 1000
@@ -195,9 +207,13 @@ ifconfig eth0 up 2>&1 >/dev/null &
 dhclient eth0 -cf /etc/dhclient.conf 2>&1 >/dev/null &
 """
 
-gui_binaries = "ldconfig.real,env,xauth,"
+gui_binaries = "ldconfig.real,env,xauth,bash,"
 
-gui_configs = "/etc/ld.so.conf.d,/etc/ld.so.conf,"
+gui_configs = "/etc/ld.so.conf.d,\
+/etc/ld.so.conf,\
+/etc/fonts/fonts.conf,\
+/usr/share/fonts/,\
+/usr/share/fontconfig,"
 
 run_script = """#!/bin/sh
 CONTAINER={name}
@@ -220,7 +236,7 @@ lxc-attach --clear-env -n $CONTAINER -- \
 env XAUTHORITY=/root/.Xauthority xauth add $XKEY &&
 lxc-attach --clear-env -n $CONTAINER -- \
 env XAUTHORITY=/root/.Xauthority DISPLAY=$DISPLAY \
-PULSE_SERVER=$PULSE_SOCKET $CMD_LINE
+PULSE_SERVER=$PULSE_SOCKET HOME=/root $CMD_LINE
 
 if [ "$STARTED" = "true" ]; then
     lxc-stop -n $CONTAINER -t 10
@@ -306,6 +322,11 @@ if __name__ == "__main__":
         default="", help='binaries configs for copying'
     )
     parser.add_argument(
+        '-l', '--lib',
+        action='store_true', dest='lib',
+        default="", help='mount /lib /lib64'
+    )
+    parser.add_argument(
         '--network',
         action='store_true', dest='network',
         default="",
@@ -370,6 +391,10 @@ if __name__ == "__main__":
         f.write(config.format(
             arch=platform.processor(), rootfs=rootfs, name=name
             ))
+
+    if args.lib:
+        with open(container_config_path, "a") as f:
+            f.write(lib_config)
 
     if args.network:
         binaries = network_binaries + binaries
@@ -448,7 +473,7 @@ if __name__ == "__main__":
         init_path = rootfs + '/sbin/init'
         with open(init_path, 'a') as f:
             if not args.gui:
-                f.write("ldconfig.real &\nexec " + args.execute)
+                f.write("exec " + args.execute)
             else:
                 f.write("ldconfig.real &\nexec /bin/bash")
 
