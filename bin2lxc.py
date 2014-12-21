@@ -25,10 +25,19 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 
-# NOTE: Skype: lxc-create -t bin2lxc -n test3 -- -b /usr/bin/skype --network --gui --exec "/usr/bin/skype"
+# NOTE: Skype:
+"""lxc-create -t bin2lxc -n skype -- \
+-b /usr/bin/skype --network --gui --exec "/usr/bin/skype"
+"""
 
-# NOTE: apt-get: lxc-create -t bin2lxc -n aptget -- -b apt-get,ping -c /etc/apt/sources.list,/etc/apt/trusted.gpg,/etc/apt/apt.conf.d/,/usr/lib/apt/ --network --gui
 # NOTE: apt-get run: apt-get -o APT::System="Debian dpkg interface"
+"""lxc-create -t bin2lxc -n aptget -- \
+-b apt-get,ping \
+-c /etc/apt/sources.list,/etc/apt/trusted.gpg,\
+/etc/apt/apt.conf.d/,/usr/lib/apt/ \
+--network \
+--gui
+"""
 
 # NOTE: use strace and chroot to debug the problem
 
@@ -39,7 +48,10 @@ import argparse
 import platform
 from subprocess import Popen, PIPE
 
-ldd = Popen(['which', 'ldd'], stdout=PIPE, stderr=PIPE).communicate()[0].strip()
+ldd = Popen(
+    ['which', 'ldd'],
+    stdout=PIPE, stderr=PIPE
+).communicate()[0].strip()
 
 rootfs_structure = [
     '/bin',
@@ -76,6 +88,7 @@ rootfs_structure = [
     '/var/cache',
     '/var/crash',
     '/var/lib',
+    '/var/lib/dpkg',
     '/var/local',
     '/var/log',
     '/var/mail',
@@ -101,6 +114,7 @@ nodes = [
     ('/dev/urandom', 33204, 2, 252),
     ('/dev/zero', 33204, 2, 252),
     ('/dev/video0', 33204, 2, 252),
+    ('/var/lib/dpkg/status', 33204, 2, 252),
 ]
 
 links = [
@@ -161,29 +175,36 @@ fi
 """
 
 network_binaries = ",".join((
-    "sh","bash","ifconfig",
-    "dhclient","dhclient-script",
-    "ip","hostname","sleep",""
+    "sh", "bash", "ifconfig",
+    "dhclient", "dhclient-script",
+    "ip", "hostname", "sleep", ""
     ))
 
-network_configs = "/lib/x86_64-linux-gnu/libnss_files.so.2,/lib/x86_64-linux-gnu/libnss_dns.so.2,/lib/x86_64-linux-gnu/libresolv.so.2,"
+# for dns
+network_configs = "\
+/lib/x86_64-linux-gnu/libnss_files.so.2,\
+/lib/x86_64-linux-gnu/libnss_dns.so.2,\
+/lib/x86_64-linux-gnu/libresolv.so.2,"
 
 # recommended_binaries = "init.lxc,"
 
 dhconf = "send host-name = gethostname();\n"
 
-ninit = """
+network_init = """
 ifconfig eth0 up 2>&1 >/dev/null &
 dhclient eth0 -cf /etc/dhclient.conf 2>&1 >/dev/null &
 """
 
-gui_binaries = "ldconfig.real,env,sleep,"
+gui_binaries = "ldconfig.real,env,xauth,"
 
 gui_configs = "/etc/ld.so.conf.d,/etc/ld.so.conf,"
 
-rscript = """#!/bin/sh
+run_script = """#!/bin/sh
 CONTAINER={name}
 CMD_LINE="{execute}"
+
+xauth extract {rootfs}/root/.Xauthority $DISPLAY
+XKEY=$(xauth list | grep -m1 unix | awk -F'/' '{{print $2}}')
 
 STARTED=false
 
@@ -195,18 +216,28 @@ fi
 
 PULSE_SOCKET=/root/.pulse_socket
 
-lxc-attach --clear-env -n $CONTAINER -- sleep 1 & env DISPLAY=$DISPLAY PULSE_SERVER=$PULSE_SOCKET $CMD_LINE
+lxc-attach --clear-env -n $CONTAINER -- \
+env XAUTHORITY=/root/.Xauthority xauth add $XKEY &&
+lxc-attach --clear-env -n $CONTAINER -- \
+env XAUTHORITY=/root/.Xauthority DISPLAY=$DISPLAY \
+PULSE_SERVER=$PULSE_SOCKET $CMD_LINE
 
 if [ "$STARTED" = "true" ]; then
     lxc-stop -n $CONTAINER -t 10
 fi
+
+rm -f {rootfs}/root/.Xauthority
+
 """
+
+icon_path = "{home}/.local/share/applications/lxc-{name}.desktop"
 
 icon = """[Desktop Entry]
 Name=lxc-{name}
 Exec={path}/start-{name} %U
 Type=Application
 """
+
 
 def copy(src, dst):
     """copy file or directory.
@@ -234,17 +265,65 @@ def copy(src, dst):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='This utility create lxc rootfs and сopy binaries with required libs to it')
-    parser.add_argument('-r', '--rootfs', action='store', dest='rootfs', help='chroot rootfs')
-    parser.add_argument('-p', '--path', action='store', dest='path', help='main path')
-    parser.add_argument('-n', '--name', action='store', dest='name', help='name')
-    parser.add_argument('-u', '--mapped-uid', action='store', dest='uid', help='mapped uid')
-    parser.add_argument('-g', '--mapped-gid', action='store', dest='gid', help='mapped gid')
-    parser.add_argument('-b', '--binaries', action='store', dest='binaries', help='binaries for copying')
-    parser.add_argument('-c', '--configs', action='store', dest='configs', default="", help='binaries configs for copying')
-    parser.add_argument('--network', action='store_true', dest='network', default="", help='copy network binaries and add commands to init script')
-    parser.add_argument('--gui', action='store_true', dest='gui', help='add access to video and audio')
-    parser.add_argument('--exec', action='store', dest='execute', default="/bin/bash", help='lxc-start by default execute programm with args (as given string)')
+    parser = argparse.ArgumentParser(
+        description='\
+        This utility create lxc rootfs \
+        and сopy binaries with required libs to it'
+    )
+    parser.add_argument(
+        '-r', '--rootfs',
+        action='store', dest='rootfs',
+        help='chroot rootfs'
+    )
+    parser.add_argument(
+        '-p', '--path',
+        action='store', dest='path',
+        help='main path'
+    )
+    parser.add_argument(
+        '-n', '--name',
+        action='store', dest='name',
+        help='name'
+    )
+    parser.add_argument(
+        '-u', '--mapped-uid',
+        action='store', dest='uid',
+        help='mapped uid'
+    )
+    parser.add_argument(
+        '-g', '--mapped-gid',
+        action='store', dest='gid',
+        help='mapped gid'
+    )
+    parser.add_argument(
+        '-b', '--binaries',
+        action='store', dest='binaries',
+        help='binaries for copying'
+    )
+    parser.add_argument(
+        '-c', '--configs',
+        action='store', dest='configs',
+        default="", help='binaries configs for copying'
+    )
+    parser.add_argument(
+        '--network',
+        action='store_true', dest='network',
+        default="",
+        help='copy network binaries \
+        and add commands to init script'
+    )
+    parser.add_argument(
+        '--gui',
+        action='store_true', dest='gui',
+        help='add access to video and audio'
+    )
+    parser.add_argument(
+        '--exec',
+        action='store', dest='execute',
+        default="/bin/bash",
+        help='lxc-start by default execute \
+        programm with args (as given string)'
+    )
     args = parser.parse_args()
 
     rootfs = args.rootfs
@@ -259,16 +338,19 @@ if __name__ == "__main__":
         print("not enough arguments")
         sys.exit(1)
 
+    # rootfs dir
     if not os.path.exists(rootfs):
         os.mkdir(rootfs)
     os.chown(rootfs, uid, gid)
 
+    # structure dirs
     for d in rootfs_structure:
         di = rootfs + d
         if not os.path.exists(di):
             os.mkdir(di)
         os.chown(di, uid, gid)
 
+    # files
     for node in nodes:
         pth = rootfs + node[0]
         mode = node[1]
@@ -277,114 +359,129 @@ if __name__ == "__main__":
             os.mknod(pth, mode, dev)
         os.chown(pth, uid, gid)
 
+    # links
     for l in links:
         pth = rootfs + l[0]
         os.symlink(l[1], pth)
 
-    pconfig = path + "/config"
-    with open(pconfig, "w+") as f:
+    # basic container config
+    container_config_path = path + "/config"
+    with open(container_config_path, "w+") as f:
         f.write(config.format(
             arch=platform.processor(), rootfs=rootfs, name=name
             ))
 
     if args.network:
         binaries = network_binaries + binaries
+        configs = network_configs + configs
+        # dhcp
         if not os.path.exists(rootfs + "/var/lib/dhcp/"):
             os.mkdir(rootfs + "/var/lib/dhcp/")
         if not os.path.exists(rootfs + "/etc/fstab"):
             with open(rootfs + "/etc/fstab", 'w') as f:
                 f.write("")
-        pdhconf = rootfs + '/etc/dhclient.conf'
-        with open(pdhconf, 'w') as f:
+        dhconf_path = rootfs + '/etc/dhclient.conf'
+        with open(dhconf_path, 'w') as f:
             f.write(dhconf)
-        os.chown(pdhconf, uid, gid)
-        pinit = rootfs + '/sbin/init'
-        with open(pinit, 'w+') as f:
-            f.write(ninit)
-        st = os.stat(pinit)
+        os.chown(dhconf_path, uid, gid)
+        # /sbin/init
+        init_path = rootfs + '/sbin/init'
+        with open(init_path, 'w+') as f:
+            f.write(network_init)
+        st = os.stat(init_path)
         # +x=73
-        os.chmod(pinit, st.st_mode | 73)
-        os.chown(pinit, uid, gid)
+        os.chmod(init_path, st.st_mode | 73)
+        os.chown(init_path, uid, gid)
         # dns
-        presolf = rootfs + '/run/resolvconf/resolv.conf'
-        with open(presolf, 'w') as f:
+        resolfconf_path = rootfs + '/run/resolvconf/resolv.conf'
+        with open(resolfconf_path, 'w') as f:
             f.write('nameserver 8.8.8.8\nnameserver 8.8.4.4\n')
-        os.chown(presolf, uid, gid)
-        configs = network_configs + configs
+        os.chown(resolfconf_path, uid, gid)
 
     if args.gui:
         binaries = gui_binaries + binaries
         configs = gui_configs + configs
-        with open(pconfig, "r") as f:
-            oconf = f.readlines()
-            nconf = []
-            for l in oconf:
-                if not "lxc.id_map" in l:
-                    nconf.append(l.rstrip())
+        # modify container config
+        with open(container_config_path, "r") as f:
+            old_config = f.readlines()
+            new_config = []
+            for l in old_config:
+                if "lxc.id_map" not in l:
+                    new_config.append(l.rstrip())
             gui_config = gui_config.format(path=path)
-            nconf += gui_config.splitlines()
-        with open(pconfig, "w") as f:
-            f.write("\n".join(nconf))
-        pscript = path + "/setup-pulse.sh"
-        with open(pscript, "a") as f:
+            new_config += gui_config.splitlines()
+        with open(container_config_path, "w") as f:
+            f.write("\n".join(new_config))
+        # setup pulse audio
+        pulse_script_path = path + "/setup-pulse.sh"
+        with open(pulse_script_path, "a") as f:
             f.write(gui_pulse_script.format(rootfs=rootfs))
         # +x=73
-        os.chmod(pscript, st.st_mode | 73)
-        os.chown(pscript, uid, gid)
-        ppulse = rootfs + '/root/.pulse'
-        if not os.path.exists(ppulse):
-            os.mkdir(ppulse)
-        os.chown(ppulse, uid, gid)
-        cpulse = ppulse + '/client.conf'
-        with open(cpulse, 'w') as f:
+        os.chmod(pulse_script_path, st.st_mode | 73)
+        os.chown(pulse_script_path, uid, gid)
+        pulse_dir_path = rootfs + '/root/.pulse'
+        if not os.path.exists(pulse_dir_path):
+            os.mkdir(pulse_dir_path)
+        os.chown(pulse_dir_path, uid, gid)
+        pulse_config_path = pulse_dir_path + '/client.conf'
+        with open(pulse_config_path, 'w') as f:
             f.write("disable-shm=yes")
-        os.chown(cpulse, uid, gid)
-        prscript = path + '/start-' + name
-        with open(prscript, 'w') as f:
-            f.write(rscript.format(
-                name=name, execute=args.execute
+        os.chown(pulse_config_path, uid, gid)
+        # run script
+        run_script_path = path + '/start-' + name
+        with open(run_script_path, 'w') as f:
+            f.write(run_script.format(
+                name=name, execute=args.execute,
+                rootfs=rootfs
                 ))
-        # +x=73
-        os.chmod(prscript, st.st_mode | 73)
-        os.chown(prscript, uid, gid)
-        picon =  "{home}/.local/share/applications/lxc-{name}.desktop".format(home=os.path.expanduser("~"), name=name)
-        with open(picon, 'w') as f:
+        # +x
+        os.chmod(run_script_path, st.st_mode | 73)
+        os.chown(run_script_path, uid, gid)
+        icon_path = icon_path.format(home=os.path.expanduser("~"), name=name)
+        with open(icon_path, 'w') as f:
             f.write(icon.format(name=name, path=path))
         # +x=73
-        os.chmod(picon, st.st_mode | 73)
-        os.chown(picon, uid, gid)
+        os.chmod(icon_path, st.st_mode | 73)
+        os.chown(icon_path, uid, gid)
 
     if args.execute:
-        pinit = rootfs + '/sbin/init'
-        with open(pinit, 'a') as f:
+        init_path = rootfs + '/sbin/init'
+        with open(init_path, 'a') as f:
             if not args.gui:
                 f.write("ldconfig.real &\nexec " + args.execute)
             else:
-                f.write("exec /bin/bash")
+                f.write("ldconfig.real &\nexec /bin/bash")
 
     if binaries:
-        for b in binaries.split(","):
-            p = Popen(['which', b], stdout=PIPE, stderr=PIPE)
-            b = p.communicate()[0].strip()
-            bnew = rootfs + b
-            copy(b, bnew)
-            os.chown(bnew, uid, gid)
-            p = Popen([ldd, b], stdout=PIPE, stderr=PIPE)
+        for binary in binaries.split(","):
+            p = Popen(['which', binary], stdout=PIPE, stderr=PIPE)
+            binary_path = p.communicate()[0].strip()
+            if not binary_path or not os.path.exists(binary_path):
+                print("%s does not exists!" % binary)
+                continue
+            new_binary_path = rootfs + binary_path
+            copy(binary_path, new_binary_path)
+            os.chown(new_binary_path, uid, gid)
+            # libs
+            p = Popen([ldd, binary_path], stdout=PIPE, stderr=PIPE)
             stdout = p.communicate()[0].strip()
             for l in stdout.split('\n'):
                 if 'lib' in l:
                     if "=" in l and len(l.split()) > 3:
-                        b = l.split()[2]
+                        library_path = l.split()[2]
                     elif "=" not in l:
-                        b = l.split()[0]
+                        library_path = l.split()[0]
                     else:
                         continue
-                    bnew = rootfs + b
-                    copy(b, bnew)
-                    os.chown(bnew, uid, gid)
+                    new_library_path = rootfs + library_path
+                    copy(library_path, new_library_path)
+                    os.chown(new_library_path, uid, gid)
 
     if configs:
-        for c in configs.split(','):
-            new = rootfs + c
-            copy(c, new)
-            os.chown(new, uid, gid)
+        for config_path in configs.split(','):
+            if config_path and not os.path.exists(config_path):
+                print("%s does not exists!" % config_path)
+                continue
+            new_config_path = rootfs + config_path
+            copy(config_path, new_config_path)
+            os.chown(new_config_path, uid, gid)
