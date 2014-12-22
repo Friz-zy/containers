@@ -27,7 +27,7 @@ SOFTWARE.
 
 # NOTE: Skype:
 """lxc-create -t bin2lxc -n skype -- \
--b /usr/bin/skype --network --gui --exec "/usr/bin/skype"
+-b /usr/bin/skype --network --gui --dbus --exec "/usr/bin/skype"
 """
 
 # NOTE: apt-get run: apt-get -o APT::System="Debian dpkg interface"
@@ -42,7 +42,7 @@ SOFTWARE.
 # NOTE: firefox:
 """lxc-create -t bin2lxc -n mozilla -- \
 -b /usr/lib/firefox/firefox -c /usr/lib/firefox/ \
---network --gui --lib \
+--network --gui --dbus --lib \
 --exec "/usr/lib/firefox/firefox -new-instance"
 """
 
@@ -207,7 +207,17 @@ ifconfig eth0 up 2>&1 >/dev/null &
 dhclient eth0 -cf /etc/dhclient.conf 2>&1 >/dev/null &
 """
 
-gui_binaries = "ldconfig.real,env,xauth,bash,"
+dbus_binaries = "dbus-daemon,\
+dbus-cleanup-sockets,\
+dbus-uuidgen,\
+dbus-launch,"
+
+dbus_configs = "/etc/dbus-1,"
+
+gui_binaries = "ldconfig.real,\
+env,\
+xauth,\
+bash,"
 
 gui_configs = "/etc/ld.so.conf.d,\
 /etc/ld.so.conf,\
@@ -233,10 +243,12 @@ fi
 PULSE_SOCKET=/root/.pulse_socket
 
 lxc-attach --clear-env -n $CONTAINER -- \
+/sbin/ldconfig.real 2>&1 >/dev/null;
+lxc-attach --clear-env -n $CONTAINER -- \
 env XAUTHORITY=/root/.Xauthority xauth add $XKEY &&
 lxc-attach --clear-env -n $CONTAINER -- \
 env XAUTHORITY=/root/.Xauthority DISPLAY=$DISPLAY \
-PULSE_SERVER=$PULSE_SOCKET HOME=/root $CMD_LINE
+PULSE_SERVER=$PULSE_SOCKET USER=root HOME=/root $CMD_LINE
 
 if [ "$STARTED" = "true" ]; then
     lxc-stop -n $CONTAINER -t 10
@@ -327,6 +339,12 @@ if __name__ == "__main__":
         default="", help='mount /lib /lib64'
     )
     parser.add_argument(
+        '-d', '--dbus',
+        action='store_true', dest='dbus',
+        default="",
+        help='use dbus-launch for executing cmd'
+    )
+    parser.add_argument(
         '--network',
         action='store_true', dest='network',
         default="",
@@ -379,11 +397,20 @@ if __name__ == "__main__":
         if not os.path.exists(pth):
             os.mknod(pth, mode, dev)
         os.chown(pth, uid, gid)
+    # /etc/passwd
+    with open(rootfs + '/etc/passwd', 'w') as f:
+         f.write('root:x:0:0:root:/root:/bin/sh')
+    os.chown(rootfs + '/etc/passwd', uid, gid)
+    # /etc/group
+    with open(rootfs + '/etc/group', 'w') as f:
+        f.write('root:x:0:root')
+    os.chown(rootfs + '/etc/group', uid, gid)
 
     # links
     for l in links:
         pth = rootfs + l[0]
         os.symlink(l[1], pth)
+
 
     # basic container config
     container_config_path = path + "/config"
@@ -395,6 +422,11 @@ if __name__ == "__main__":
     if args.lib:
         with open(container_config_path, "a") as f:
             f.write(lib_config)
+
+    if args.dbus:
+        binaries = dbus_binaries + binaries
+        configs = dbus_configs + configs
+        args.execute = "dbus-launch " + args.execute
 
     if args.network:
         binaries = network_binaries + binaries
@@ -475,7 +507,7 @@ if __name__ == "__main__":
             if not args.gui:
                 f.write("exec " + args.execute)
             else:
-                f.write("ldconfig.real &\nexec /bin/bash")
+                f.write("exec /bin/bash")
 
     if binaries:
         for binary in binaries.split(","):
