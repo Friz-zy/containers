@@ -73,6 +73,13 @@ import argparse
 from ctypes import *
 
 
+logging.basicConfig(
+    format=u'%(asctime)s  %(name)s\t%(levelname)-8s\t%(message)s',
+    datefmt='%d %b %Y %H:%M:%S',
+    stream=sys.stdout, # will be replacing by filename
+    level=logging.INFO,
+)
+
 libc = CDLL("libc.so.6")
 """Import libc.so.6 as libc"""
 
@@ -154,9 +161,6 @@ aa('-v', action='store_true', dest='verbose',
    help='Display verbose messages')
 args = parser.parse_args()
 
-def errExit(msg):
-    logging.error(msg)
-    sys.exit(1)
 
 def update_map(mapping, map_file):
     """
@@ -177,8 +181,12 @@ def update_map(mapping, map_file):
     #Replace commas in mapping string with newlines
     mapping = mapping.replace(',', '\n')
 
-    with open(map_file, 'w') as f:
-        f.write(mapping)
+    try:
+        with open(map_file, 'w') as f:
+            f.write(mapping)
+    except IOError as e:
+        logging.error("Can not write %s", map_file)
+        logging.error(e)
 
 def childFunc():
     """Start function for cloned child.
@@ -202,7 +210,7 @@ def childFunc():
         sys.exit(1)
 
     # Execute a shell command
-    print("About to exec %s\n" % args.argv[0])
+    logging.info("About to exec %s\n", args.argv[0])
     os.execvp(args.argv[0], args.argv)
 
 if __name__ == '__main__':
