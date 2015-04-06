@@ -27,7 +27,18 @@ SOFTWARE.
 
 # NOTE: Skype:
 """lxc-create -t bin2lxc -n skype -- \
--b /usr/bin/skype --network --gui --dbus --exec "/usr/bin/skype"
+-b /usr/bin/skype -c \
+/usr/share/X11,\
+/usr/lib/x86_64-linux-gnu/libthai.so.0,\
+/usr/lib/qt4,\
+/usr/lib/i386-linux-gnu/gconv,\
+/usr/share/locale/,\
+/etc/fonts/,\
+/usr/share/fonts,\
+/usr/lib/i386-linux-gnu/libXrandr.so.2,\
+/usr/lib/i386-linux-gnu/libXcursor.so.1,\
+--network --gui --dbus --exec "/usr/bin/skype"
+wget http://www.skype.com/go/getskype-linux-beta-dynamic -O - | tar -xj -C .local/share/lxc/skype/rootfs/bin/ --strip 1
 """
 
 # NOTE: apt-get run: apt-get -o APT::System="Debian dpkg interface"
